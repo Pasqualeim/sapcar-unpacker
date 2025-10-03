@@ -16,6 +16,7 @@ NOVITÀ:
   * Pulsante "Crea .tar della destinazione" per generare un archivio TAR della cartella estratta
   * Pulsante "Apri cartella destinazione" (apre Esplora File sulla cartella di output)
   * Controllo aggiornamenti da GitHub Releases
+  * Salvataggio/ricarica dell’ultimo SAPCAR.exe usato
 """
 
 import os
@@ -29,8 +30,8 @@ from tkinter import filedialog, messagebox, scrolledtext
 import time
 from tkinter import ttk
 
-__version__ = "1.1.0"  # <--- aggiorna ad ogni release
-GITHUB_USER = "Pasqualeim"   # <-- metti il tuo username GitHub
+__version__ = "1.1.1"  # <--- aggiorna ad ogni release
+GITHUB_USER = "IL_TUO_USERNAME_GITHUB"   # <-- metti il tuo username GitHub
 GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
 
 import json
@@ -38,16 +39,8 @@ import webbrowser
 import urllib.request
 import urllib.error
 
-# --- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR.exe ---
-def _settings_file() -> str:
-    base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SapcarUnpacker")
-    try:
-        os.makedirs(base, exist_ok=True)
-    except Exception:
-        pass
-    return os.path.join(base, "settings.json")
 
-# ---------- Utilità versione / update checker ----------
+# ---------- Update checker (GitHub Releases) ----------
 def _parse_ver(v: str):
     v = v.strip().lstrip("vV")
     parts = []
@@ -85,6 +78,16 @@ def check_updates_async(parent):
             # offline, repo privato o limite API: ignora silenziosamente
             pass
     threading.Thread(target=worker, daemon=True).start()
+
+
+# ---------- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR.exe ----------
+def _settings_file() -> str:
+    base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SapcarUnpacker")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(base, "settings.json")
 
 
 # ---------- Utilità percorso / esecuzione ----------
@@ -265,14 +268,12 @@ class App(tk.Tk):
         self.log = scrolledtext.ScrolledText(self, height=20, state="disabled")
         self.log.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Carica ultimo SAPCAR salvato e hook di chiusura
+        self.load_last_sapcar()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
         # Avvia controllo aggiornamenti 1.5s dopo l’apertura, senza bloccare la GUI
         self.after(1500, lambda: check_updates_async(self))
-        
-        # Carica l'ultimo SAPCAR salvato (se presente)
-        self.load_last_sapcar()
-
-        # Salva in chiusura
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ----- UI helpers -----
     def log_line(self, line: str):
@@ -419,37 +420,6 @@ class App(tk.Tk):
             elapsed = time.time() - (self._start_ts or time.time())
             self.progress_lbl.config(text=f"Completato • {self._fmt_time(elapsed)}")
         self.after(0, _apply)
-        
-        def load_last_sapcar(self):
-        """Carica l'ultimo SAPCAR.exe usato da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
-        try:
-            with open(_settings_file(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-            last = data.get("sapcar_path")
-            if last and os.path.isfile(last):
-                self.sapcar_path.set(last)
-                self.log_line(f"(impostazioni) Caricato ultimo SAPCAR.exe: {last}")
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            self.log_line(f"(impostazioni) Errore lettura impostazioni: {e}")
-
-    def save_last_sapcar(self):
-        """Salva SOLO il percorso corrente di SAPCAR.exe nel file impostazioni."""
-        try:
-            val = self.sapcar_path.get().strip('" ')
-            data = {"sapcar_path": val} if val else {}
-            with open(_settings_file(), "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            self.log_line(f"(impostazioni) Errore salvataggio impostazioni: {e}")
-
-    def on_close(self):
-        """Salva l'ultimo SAPCAR.exe e chiude l'app."""
-        try:
-            self.save_last_sapcar()
-        finally:
-            self.destroy()
 
     # ----- Estrazione pacchetti -----
     def run_extraction(self):
@@ -540,8 +510,11 @@ class App(tk.Tk):
 
         disp = find_dispwork(dest)
         if not disp:
-            messagebox.showerror("disp+work non trovato", "Non è stato trovato 'disp+work' nella cartella di destinazione.\n"
-                                 "Controlla di aver estratto SAPEXE / SAPEXEDB correttamente.")
+            messagebox.showerror(
+                "disp+work non trovato",
+                "Non è stato trovato 'disp+work' nella cartella di destinazione.\n"
+                "Controlla di aver estratto SAPEXE / SAPEXEDB correttamente."
+            )
             return
 
         disp_dir = os.path.dirname(disp)
@@ -655,14 +628,14 @@ class App(tk.Tk):
                             if os.path.abspath(full) == save_abs:
                                 # skip il file .tar stesso
                                 continue
-                            arcname = os.path.join(base, os.path.relpath(full, start=dest_dir))
+                            arcname = os.path.join(base, os.path.relpath(full, start=dest_dir)).replace("\\", "/")
                             self.log_line(f"Aggiungo: {arcname}")
                             tar.add(full, arcname=arcname, recursive=False)
                         # aggiungi directory vuote (tar su Linux le vede)
                         for d in dirs:
                             dir_full = os.path.join(root, d)
-                            rel_arc = os.path.join(base, os.path.relpath(dir_full, start=dest_dir))
-                            ti = tarfile.TarInfo(rel_arc.replace("\\", "/"))
+                            rel_arc = os.path.join(base, os.path.relpath(dir_full, start=dest_dir)).replace("\\", "/")
+                            ti = tarfile.TarInfo(rel_arc)
                             ti.type = tarfile.DIRTYPE
                             try:
                                 ti.mtime = int(os.path.getmtime(dir_full))
@@ -688,11 +661,43 @@ class App(tk.Tk):
         try:
             os.startfile(d)  # Windows
         except Exception as e:
-            # Fallback: prova con explorer
             try:
                 subprocess.Popen(["explorer", d])
             except Exception:
                 messagebox.showerror("Errore", f"Impossibile aprire la cartella:\n{e}")
+
+    # ----- Settings: salva/leggi ultimo SAPCAR.exe -----
+    def load_last_sapcar(self):
+        """Carica l'ultimo SAPCAR.exe usato da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
+        try:
+            with open(_settings_file(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            last = data.get("sapcar_path")
+            if last and os.path.isfile(last):
+                self.sapcar_path.set(last)
+                self.log_line(f"(impostazioni) Caricato ultimo SAPCAR.exe: {last}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.log_line(f"(impostazioni) Errore lettura impostazioni: {e}")
+
+    def save_last_sapcar(self):
+        """Salva SOLO il percorso corrente di SAPCAR.exe nel file impostazioni."""
+        try:
+            val = self.sapcar_path.get().strip('" ')
+            data = {"sapcar_path": val} if val else {}
+            with open(_settings_file(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log_line(f"(impostazioni) Errore salvataggio impostazioni: {e}")
+
+    def on_close(self):
+        """Salva l'ultimo SAPCAR.exe e chiude l'app."""
+        try:
+            self.save_last_sapcar()
+        finally:
+            self.destroy()
+
 
 def main():
     try:
