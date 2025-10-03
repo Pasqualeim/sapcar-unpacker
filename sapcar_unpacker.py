@@ -9,9 +9,13 @@ SAPCAR Unpacker (Windows, Thonny)
 - Converte i percorsi con spazi in short path (8.3) per evitare errori di SAPCAR
 - Pulsante "Testa kernel (disp+work -v)" che cerca disp+work ed esegue la versione
 - Mostra solo la sezione principale dell'output di disp+work
-- NOVITÀ:
+
+NOVITÀ:
   * Estrae prima i pacchetti che iniziano con "SAPEXE*" (es. SAPEXE_, SAPEXEDB_) e poi gli altri
+  * Barra di avanzamento + ETA
   * Pulsante "Crea .tar della destinazione" per generare un archivio TAR della cartella estratta
+  * Pulsante "Apri cartella destinazione" (apre Esplora File sulla cartella di output)
+  * Controllo aggiornamenti da GitHub Releases
 """
 
 import os
@@ -22,9 +26,68 @@ import threading
 import tarfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
+import time
+from tkinter import ttk
+
+__version__ = "1.1.0"  # <--- aggiorna ad ogni release
+GITHUB_USER = "Pasqualeim"   # <-- metti il tuo username GitHub
+GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
+
+import json
+import webbrowser
+import urllib.request
+import urllib.error
+
+# --- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR.exe ---
+def _settings_file() -> str:
+    base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SapcarUnpacker")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(base, "settings.json")
+
+# ---------- Utilità versione / update checker ----------
+def _parse_ver(v: str):
+    v = v.strip().lstrip("vV")
+    parts = []
+    for p in v.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            break
+    return tuple(parts)
+
+def get_latest_release():
+    """Ottiene (tag, url) dalla Release più recente del repo GitHub."""
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(url, headers={"User-Agent": f"{GITHUB_REPO}/{__version__}"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    tag = data.get("tag_name") or data.get("name") or ""
+    html_url = data.get("html_url") or f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
+    return tag, html_url
+
+def _notify_update(parent, latest_tag, rel_url):
+    if messagebox.askyesno(
+        "Aggiornamento disponibile",
+        f"È disponibile la versione {latest_tag} (tu hai {__version__}).\nAprire la pagina Releases su GitHub?"
+    ):
+        webbrowser.open(rel_url)
+
+def check_updates_async(parent):
+    def worker():
+        try:
+            latest_tag, rel_url = get_latest_release()
+            if latest_tag and _parse_ver(latest_tag) > _parse_ver(__version__):
+                parent.after(0, lambda: _notify_update(parent, latest_tag, rel_url))
+        except Exception:
+            # offline, repo privato o limite API: ignora silenziosamente
+            pass
+    threading.Thread(target=worker, daemon=True).start()
 
 
-# ---------- Utilità percorso ----------
+# ---------- Utilità percorso / esecuzione ----------
 def to_short_path(path: str) -> str:
     """Converte un percorso Windows in DOS 8.3 (short path). Se fallisce, restituisce l'originale."""
     try:
@@ -40,7 +103,6 @@ def to_short_path(path: str) -> str:
     except Exception:
         return path
 
-
 def get_powershell_exe() -> str:
     """Trova PowerShell (Windows PowerShell o PowerShell 7)."""
     for candidate in ("powershell", "powershell.exe", "pwsh", "pwsh.exe"):
@@ -48,7 +110,6 @@ def get_powershell_exe() -> str:
         if path:
             return path
     return "powershell"
-
 
 def run_cmd(cwd, cmd, log_callback):
     """Esegue un comando (lista argomenti) e streamma stdout/stderr nel log."""
@@ -111,7 +172,6 @@ def find_dispwork(base_dir: str):
     candidates.sort(reverse=True)
     return candidates[0][3]
 
-
 def extract_dispwork_main_section(lines):
     """
     Estrae solo la parte principale dell'output di 'disp+work -v':
@@ -133,7 +193,7 @@ def extract_dispwork_main_section(lines):
     if start_idx is None:
         return lines
 
-    for i, raw, low in norm[start_idx + 1 :]:
+    for i, raw, low in norm[start_idx + 1:]:
         if low == "disp+work patch information":
             end_idx = i
             if i > 0 and set(norm[i - 1][1].strip()) <= set("-"):
@@ -151,7 +211,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("SAPCAR Unpacker")
-        self.geometry("980x620")
+        self.geometry("980x660")
         self.resizable(True, True)
 
         self.sapcar_path = tk.StringVar()
@@ -190,10 +250,29 @@ class App(tk.Tk):
         tk.Button(frm3, text="Esporta script PowerShell", command=self.export_batch).pack(side="left", padx=8)
         tk.Button(frm3, text="Testa kernel (disp+work -v)", command=self.test_kernel).pack(side="left", padx=8)
         tk.Button(frm3, text="Crea .tar della destinazione", command=self.create_tar_of_destination).pack(side="left", padx=8)
+        tk.Button(frm3, text="Apri cartella destinazione", command=self.open_destination).pack(side="left", padx=8)
+
+        # Row 3.5: Progress
+        frmP = tk.Frame(self)
+        frmP.pack(fill="x", padx=10, pady=(0, 6))
+        self.progress_var = tk.DoubleVar(value=0.0)  # percentuale 0..100
+        self.progress_bar = ttk.Progressbar(frmP, maximum=100.0, variable=self.progress_var)
+        self.progress_bar.pack(fill="x", side="left", expand=True)
+        self.progress_lbl = tk.Label(frmP, text="Pronto")
+        self.progress_lbl.pack(side="left", padx=10)
 
         # Row 4: Log
         self.log = scrolledtext.ScrolledText(self, height=20, state="disabled")
         self.log.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Avvia controllo aggiornamenti 1.5s dopo l’apertura, senza bloccare la GUI
+        self.after(1500, lambda: check_updates_async(self))
+        
+        # Carica l'ultimo SAPCAR salvato (se presente)
+        self.load_last_sapcar()
+
+        # Salva in chiusura
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ----- UI helpers -----
     def log_line(self, line: str):
@@ -210,6 +289,7 @@ class App(tk.Tk):
         )
         if path:
             self.sapcar_path.set(path)
+            self.save_last_sapcar()
 
     def choose_sar_files(self):
         files = filedialog.askopenfilenames(
@@ -280,6 +360,97 @@ class App(tk.Tk):
             return False
         return True
 
+    # ----- Progress bar helpers -----
+    def _fmt_time(self, sec: float) -> str:
+        if sec is None or sec <= 0 or sec == float("inf"):
+            return "--:--"
+        m, s = divmod(int(sec), 60)
+        if m >= 100:  # evita stringhe assurde per stime sballate
+            return f"{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def init_progress(self, total: int):
+        """Inizializza stato avanzamento & ETA."""
+        self._total_pkgs = max(0, int(total))
+        self._done_pkgs = 0
+        self._start_ts = time.time()
+        self._durations = []       # durate per pacchetto (sec)
+        self._ma_window = 6        # finestra per media mobile (ultimi N pacchetti)
+        # UI
+        self.progress_var.set(0.0)
+        self.progress_lbl.config(text="Pronto")
+        self.update_idletasks()
+
+    def tick_progress(self, last_duration: float | None):
+        """
+        Aggiorna stato dopo un pacchetto estratto (OK o errore).
+        Usa media mobile sulle durate per stimare ETA.
+        """
+        self._done_pkgs = min(self._done_pkgs + 1, self._total_pkgs)
+        if last_duration and last_duration > 0:
+            self._durations.append(last_duration)
+            if len(self._durations) > self._ma_window:
+                self._durations = self._durations[-self._ma_window:]
+
+        # Percentuale
+        perc = 0.0
+        if self._total_pkgs > 0:
+            perc = (self._done_pkgs / self._total_pkgs) * 100.0
+
+        # ETA (stima semplice)
+        eta_sec = None
+        if self._durations and self._total_pkgs > self._done_pkgs:
+            avg = sum(self._durations) / len(self._durations)
+            remaining = self._total_pkgs - self._done_pkgs
+            eta_sec = avg * remaining
+
+        # Aggiorna UI in modo thread-safe
+        def _apply():
+            self.progress_var.set(perc)
+            self.progress_lbl.config(
+                text=f"{self._done_pkgs}/{self._total_pkgs} • {int(perc)}% • ETA {self._fmt_time(eta_sec)}"
+            )
+        self.after(0, _apply)
+
+    def finish_progress(self):
+        """Imposta al 100% e stato finale."""
+        def _apply():
+            self.progress_var.set(100.0)
+            elapsed = time.time() - (self._start_ts or time.time())
+            self.progress_lbl.config(text=f"Completato • {self._fmt_time(elapsed)}")
+        self.after(0, _apply)
+        
+        def load_last_sapcar(self):
+        """Carica l'ultimo SAPCAR.exe usato da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
+        try:
+            with open(_settings_file(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            last = data.get("sapcar_path")
+            if last and os.path.isfile(last):
+                self.sapcar_path.set(last)
+                self.log_line(f"(impostazioni) Caricato ultimo SAPCAR.exe: {last}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self.log_line(f"(impostazioni) Errore lettura impostazioni: {e}")
+
+    def save_last_sapcar(self):
+        """Salva SOLO il percorso corrente di SAPCAR.exe nel file impostazioni."""
+        try:
+            val = self.sapcar_path.get().strip('" ')
+            data = {"sapcar_path": val} if val else {}
+            with open(_settings_file(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log_line(f"(impostazioni) Errore salvataggio impostazioni: {e}")
+
+    def on_close(self):
+        """Salva l'ultimo SAPCAR.exe e chiude l'app."""
+        try:
+            self.save_last_sapcar()
+        finally:
+            self.destroy()
+
     # ----- Estrazione pacchetti -----
     def run_extraction(self):
         if not self.validate_inputs():
@@ -312,6 +483,9 @@ class App(tk.Tk):
             dest_norm = os.path.normpath(dest_long)
             dest_short = to_short_path(dest_norm)
 
+            # Inizializza progress bar totale
+            self.init_progress(len(sar_list_sorted))
+
             for idx, sar in enumerate(sar_list_sorted, start=1):
                 self.log_line(f"\n[{idx}/{len(sar_list_sorted)}] Estrazione di: {sar}")
                 sar_norm = os.path.normpath(sar)
@@ -325,11 +499,15 @@ class App(tk.Tk):
                 sar_arg = sar_short if (sar_short == to_short_path(sar_short) and " " not in sar_short) else f'"{sar_norm}"'
                 dest_arg = dest_short if (dest_short == to_short_path(dest_short) and " " not in dest_short) else f'"{dest_norm}"'
 
+                # PowerShell: --% = pass-through
                 ps_cmd = f'& ./SAPCAR.exe --% -xvf {sar_arg} -R {dest_arg}'
                 cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
 
                 self.log_line(f"Comando PowerShell: {ps_cmd} (cwd={sapcar_dir})")
+
+                t0 = time.time()
                 rc = run_cmd(sapcar_dir, cmd, self.log_line)
+                elapsed = time.time() - t0
 
                 if rc == 0:
                     self.log_line(f"[OK] Estratto: {os.path.basename(sar_norm)}")
@@ -337,12 +515,18 @@ class App(tk.Tk):
                     overall_rc = rc or overall_rc
                     self.log_line(f"[ERRORE] RC={rc} su: {os.path.basename(sar_norm)}")
 
+                # Aggiorna progress bar / ETA
+                self.tick_progress(elapsed)
+
             if overall_rc == 0:
                 self.log_line("\n== Completato senza errori ==")
                 messagebox.showinfo("Fatto", "Estrazione completata senza errori.")
             else:
                 self.log_line("\n== Completato con errori ==")
                 messagebox.showwarning("Completato con errori", "Alcune estrazioni non sono andate a buon fine. Controlla il log.")
+
+            # Chiudi progress
+            self.finish_progress()
             self.run_btn.config(state="normal")
 
         threading.Thread(target=worker, daemon=True).start()
@@ -462,7 +646,6 @@ class App(tk.Tk):
                 # Evita di includere il tar se l'utente lo salva dentro la stessa cartella
                 save_abs = os.path.abspath(save_to)
                 base = os.path.basename(dest_dir.rstrip("\\/"))
-                base_parent = os.path.dirname(dest_dir)
 
                 with tarfile.open(save_abs, "w") as tar:
                     # Aggiunge i file ricorsivamente preservando il nome root 'base'
@@ -472,7 +655,6 @@ class App(tk.Tk):
                             if os.path.abspath(full) == save_abs:
                                 # skip il file .tar stesso
                                 continue
-                            rel = os.path.relpath(full, start=os.path.dirname(dest_dir))
                             arcname = os.path.join(base, os.path.relpath(full, start=dest_dir))
                             self.log_line(f"Aggiungo: {arcname}")
                             tar.add(full, arcname=arcname, recursive=False)
@@ -482,7 +664,10 @@ class App(tk.Tk):
                             rel_arc = os.path.join(base, os.path.relpath(dir_full, start=dest_dir))
                             ti = tarfile.TarInfo(rel_arc.replace("\\", "/"))
                             ti.type = tarfile.DIRTYPE
-                            ti.mtime = int(os.path.getmtime(dir_full))
+                            try:
+                                ti.mtime = int(os.path.getmtime(dir_full))
+                            except Exception:
+                                ti.mtime = int(time.time())
                             tar.addfile(ti)
 
                 self.log_line("[OK] Archivio TAR creato.")
@@ -493,6 +678,21 @@ class App(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    # ----- Apri cartella destinazione -----
+    def open_destination(self):
+        """Apre Esplora File sulla cartella di destinazione."""
+        d = self.dest_dir.get().strip('" ')
+        if not d or not os.path.isdir(d):
+            messagebox.showerror("Errore", "Seleziona una cartella di destinazione valida.")
+            return
+        try:
+            os.startfile(d)  # Windows
+        except Exception as e:
+            # Fallback: prova con explorer
+            try:
+                subprocess.Popen(["explorer", d])
+            except Exception:
+                messagebox.showerror("Errore", f"Impossibile aprire la cartella:\n{e}")
 
 def main():
     try:
