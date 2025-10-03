@@ -30,7 +30,7 @@ from tkinter import filedialog, messagebox, scrolledtext
 import time
 from tkinter import ttk
 
-__version__ = "1.1.1"  # <--- aggiorna ad ogni release
+__version__ = "1.1.2"  # <--- aggiorna ad ogni release
 GITHUB_USER = "IL_TUO_USERNAME_GITHUB"   # <-- metti il tuo username GitHub
 GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
 
