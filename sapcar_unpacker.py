@@ -31,7 +31,7 @@ from tkinter import filedialog, messagebox, scrolledtext
 import time
 from tkinter import ttk
 
-__version__ = "1.1.3"  # <--- aggiorna ad ogni release
+__version__ = "1.1.4"  # <--- aggiorna ad ogni release
 GITHUB_USER = "Pasqualeim"   # <-- metti il tuo username GitHub
 GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
 
