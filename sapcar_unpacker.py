@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 SAPCAR Unpacker (Windows, Thonny)
-- Scegli SAPCAR.exe
+- Scegli un eseguibile che INIZI con "SAPCAR" (es. SAPCAR.exe, SAPCAR_721-80000935.exe, ...)
 - Seleziona uno o più .SAR (file singoli o intera cartella)
 - Scegli la cartella di destinazione
-- Estrae con: "./SAPCAR.exe -xvf <pkg> -R <dest>" via PowerShell (così `./` funziona)
+- Estrae con: "./<NOME_SAPCAR> -xvf <pkg> -R <dest>" via PowerShell (così `./` funziona)
 - Converte i percorsi con spazi in short path (8.3) per evitare errori di SAPCAR
 - Pulsante "Testa kernel (disp+work -v)" che cerca disp+work ed esegue la versione
 - Mostra solo la sezione principale dell'output di disp+work
@@ -16,7 +16,8 @@ NOVITÀ:
   * Pulsante "Crea .tar della destinazione" per generare un archivio TAR della cartella estratta
   * Pulsante "Apri cartella destinazione" (apre Esplora File sulla cartella di output)
   * Controllo aggiornamenti da GitHub Releases
-  * Salvataggio/ricarica dell’ultimo SAPCAR.exe usato
+  * Salvataggio/ricarica dell’ultimo SAPCAR scelto
+  * ✅ Supporto a nomi di SAPCAR che iniziano con "SAPCAR" (non per forza "SAPCAR.exe")
 """
 
 import os
@@ -30,8 +31,8 @@ from tkinter import filedialog, messagebox, scrolledtext
 import time
 from tkinter import ttk
 
-__version__ = "1.1.2"  # <--- aggiorna ad ogni release
-GITHUB_USER = "IL_TUO_USERNAME_GITHUB"   # <-- metti il tuo username GitHub
+__version__ = "1.1.3"  # <--- aggiorna ad ogni release
+GITHUB_USER = "Pasqualeim"   # <-- metti il tuo username GitHub
 GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
 
 import json
@@ -75,12 +76,11 @@ def check_updates_async(parent):
             if latest_tag and _parse_ver(latest_tag) > _parse_ver(__version__):
                 parent.after(0, lambda: _notify_update(parent, latest_tag, rel_url))
         except Exception:
-            # offline, repo privato o limite API: ignora silenziosamente
             pass
     threading.Thread(target=worker, daemon=True).start()
 
 
-# ---------- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR.exe ----------
+# ---------- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR scelto ----------
 def _settings_file() -> str:
     base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SapcarUnpacker")
     try:
@@ -221,10 +221,10 @@ class App(tk.Tk):
         self.dest_dir = tk.StringVar()
         self.sar_files = []
 
-        # Row 0: SAPCAR
+        # Row 0: SAPCAR (può chiamarsi SAPCAR*, non per forza SAPCAR.exe)
         frm0 = tk.Frame(self)
         frm0.pack(fill="x", padx=10, pady=6)
-        tk.Label(frm0, text="SAPCAR.exe:").pack(side="left")
+        tk.Label(frm0, text="Eseguibile SAPCAR*:").pack(side="left")
         tk.Entry(frm0, textvariable=self.sapcar_path).pack(side="left", fill="x", expand=True, padx=8)
         tk.Button(frm0, text="Scegli...", command=self.choose_sapcar).pack(side="left")
 
@@ -245,15 +245,23 @@ class App(tk.Tk):
         tk.Entry(frm2, textvariable=self.dest_dir).pack(side="left", fill="x", expand=True, padx=8)
         tk.Button(frm2, text="Scegli cartella...", command=self.choose_dest_dir).pack(side="left")
 
-        # Row 3: Actions
-        frm3 = tk.Frame(self)
+        # Row 3: Actions (griglia su 2 righe)
+        frm3 = tk.LabelFrame(self, text="Azioni")
         frm3.pack(fill="x", padx=10, pady=6)
-        self.run_btn = tk.Button(frm3, text="Esegui Estrazione", command=self.run_extraction)
-        self.run_btn.pack(side="left")
-        tk.Button(frm3, text="Esporta script PowerShell", command=self.export_batch).pack(side="left", padx=8)
-        tk.Button(frm3, text="Testa kernel (disp+work -v)", command=self.test_kernel).pack(side="left", padx=8)
-        tk.Button(frm3, text="Crea .tar della destinazione", command=self.create_tar_of_destination).pack(side="left", padx=8)
-        tk.Button(frm3, text="Apri cartella destinazione", command=self.open_destination).pack(side="left", padx=8)
+        for i in range(3):
+            frm3.grid_columnconfigure(i, weight=1, uniform="act")
+
+        self.run_btn   = tk.Button(frm3, text="Esegui Estrazione", command=self.run_extraction)
+        self.test_btn  = tk.Button(frm3, text="Testa kernel (disp+work -v)", command=self.test_kernel)
+        self.export_btn= tk.Button(frm3, text="Esporta script PowerShell", command=self.export_batch)
+        self.tar_btn   = tk.Button(frm3, text="Crea .tar della destinazione", command=self.create_tar_of_destination)
+        self.open_btn  = tk.Button(frm3, text="Apri cartella destinazione", command=self.open_destination)
+
+        self.run_btn.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=6, pady=(4, 6))
+        self.test_btn.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
+        self.export_btn.grid(row=1, column=1, sticky="nsew", padx=6, pady=4)
+        self.tar_btn.grid(row=1, column=2, sticky="nsew", padx=6, pady=4)
+        self.open_btn.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=6, pady=(4, 2))
 
         # Row 3.5: Progress
         frmP = tk.Frame(self)
@@ -285,10 +293,21 @@ class App(tk.Tk):
 
     def choose_sapcar(self):
         path = filedialog.askopenfilename(
-            title="Seleziona SAPCAR.exe",
-            filetypes=[("SAPCAR", "SAPCAR.exe"), ("Exe", "*.exe"), ("Tutti i file", "*.*")]
+            title="Seleziona eseguibile SAPCAR*",
+            filetypes=[
+                ("SAPCAR*", "SAPCAR*.*"),
+                ("Eseguibili", "*.exe"),
+                ("Tutti i file", "*.*"),
+            ]
         )
         if path:
+            name = os.path.basename(path)
+            if not name.upper().startswith("SAPCAR"):
+                messagebox.showerror(
+                    "File non valido",
+                    "L'eseguibile deve iniziare con 'SAPCAR' (es. SAPCAR.exe, SAPCAR_721-8000xxxx.exe)."
+                )
+                return
             self.sapcar_path.set(path)
             self.save_last_sapcar()
 
@@ -345,7 +364,11 @@ class App(tk.Tk):
     def validate_inputs(self):
         sapcar = self.sapcar_path.get().strip('" ')
         if not sapcar or not os.path.isfile(sapcar):
-            messagebox.showerror("Errore", "Seleziona un file SAPCAR.exe valido.")
+            messagebox.showerror("Errore", "Seleziona un eseguibile SAPCAR* valido.")
+            return False
+        # Enforce: deve iniziare con SAPCAR
+        if not os.path.basename(sapcar).upper().startswith("SAPCAR"):
+            messagebox.showerror("Errore", "L'eseguibile deve iniziare con 'SAPCAR'.")
             return False
         if not self.sar_files:
             messagebox.showerror("Errore", "Aggiungi almeno un file .SAR (singolo o da cartella).")
@@ -366,7 +389,7 @@ class App(tk.Tk):
         if sec is None or sec <= 0 or sec == float("inf"):
             return "--:--"
         m, s = divmod(int(sec), 60)
-        if m >= 100:  # evita stringhe assurde per stime sballate
+        if m >= 100:
             return f"{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
 
@@ -375,42 +398,29 @@ class App(tk.Tk):
         self._total_pkgs = max(0, int(total))
         self._done_pkgs = 0
         self._start_ts = time.time()
-        self._durations = []       # durate per pacchetto (sec)
-        self._ma_window = 6        # finestra per media mobile (ultimi N pacchetti)
-        # UI
+        self._durations = []
+        self._ma_window = 6
         self.progress_var.set(0.0)
         self.progress_lbl.config(text="Pronto")
         self.update_idletasks()
 
     def tick_progress(self, last_duration: float | None):
-        """
-        Aggiorna stato dopo un pacchetto estratto (OK o errore).
-        Usa media mobile sulle durate per stimare ETA.
-        """
+        """Aggiorna stato dopo un pacchetto estratto (OK o errore) e stima ETA."""
         self._done_pkgs = min(self._done_pkgs + 1, self._total_pkgs)
         if last_duration and last_duration > 0:
             self._durations.append(last_duration)
             if len(self._durations) > self._ma_window:
                 self._durations = self._durations[-self._ma_window:]
-
-        # Percentuale
-        perc = 0.0
-        if self._total_pkgs > 0:
-            perc = (self._done_pkgs / self._total_pkgs) * 100.0
-
-        # ETA (stima semplice)
+        perc = 0.0 if self._total_pkgs == 0 else (self._done_pkgs / self._total_pkgs) * 100.0
         eta_sec = None
         if self._durations and self._total_pkgs > self._done_pkgs:
             avg = sum(self._durations) / len(self._durations)
             remaining = self._total_pkgs - self._done_pkgs
             eta_sec = avg * remaining
 
-        # Aggiorna UI in modo thread-safe
         def _apply():
             self.progress_var.set(perc)
-            self.progress_lbl.config(
-                text=f"{self._done_pkgs}/{self._total_pkgs} • {int(perc)}% • ETA {self._fmt_time(eta_sec)}"
-            )
+            self.progress_lbl.config(text=f"{self._done_pkgs}/{self._total_pkgs} • {int(perc)}% • ETA {self._fmt_time(eta_sec)}")
         self.after(0, _apply)
 
     def finish_progress(self):
@@ -428,6 +438,7 @@ class App(tk.Tk):
 
         sapcar = os.path.abspath(self.sapcar_path.get().strip('" '))
         sapcar_dir = os.path.dirname(sapcar)
+        sapcar_name = os.path.basename(sapcar)  # <-- usa il nome reale scelto (SAPCAR*)
         dest_long = self.dest_dir.get().strip('" ')
         sar_list = list(self.sar_files)
 
@@ -469,8 +480,8 @@ class App(tk.Tk):
                 sar_arg = sar_short if (sar_short == to_short_path(sar_short) and " " not in sar_short) else f'"{sar_norm}"'
                 dest_arg = dest_short if (dest_short == to_short_path(dest_short) and " " not in dest_short) else f'"{dest_norm}"'
 
-                # PowerShell: --% = pass-through
-                ps_cmd = f'& ./SAPCAR.exe --% -xvf {sar_arg} -R {dest_arg}'
+                # PowerShell: --% = pass-through | usa il NOME REALE di SAPCAR
+                ps_cmd = f'& ./"{sapcar_name}" --% -xvf {sar_arg} -R {dest_arg}'
                 cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
 
                 self.log_line(f"Comando PowerShell: {ps_cmd} (cwd={sapcar_dir})")
@@ -559,6 +570,7 @@ class App(tk.Tk):
             return
         sapcar = os.path.abspath(self.sapcar_path.get().strip('" '))
         sapcar_dir = os.path.dirname(sapcar)
+        sapcar_name = os.path.basename(sapcar)  # <-- usa il nome reale scelto (SAPCAR*)
         dest_norm = os.path.normpath(self.dest_dir.get().strip('" '))
         dest_short = to_short_path(dest_norm)
 
@@ -573,7 +585,8 @@ class App(tk.Tk):
             sar_short = to_short_path(sar_norm)
             sar_arg = sar_short if (sar_short == to_short_path(sar_short) and " " not in sar_short) else f'"{sar_norm}"'
             dest_arg = dest_short if (dest_short == to_short_path(dest_short) and " " not in dest_short) else f'"{dest_norm}"'
-            lines.append(f'& ./SAPCAR.exe --% -xvf {sar_arg} -R {dest_arg}')
+            # Usa il nome reale dell'eseguibile
+            lines.append(f'& ./"{sapcar_name}" --% -xvf {sar_arg} -R {dest_arg}')
 
         save_to = filedialog.asksaveasfilename(
             title="Salva script PowerShell",
@@ -616,22 +629,18 @@ class App(tk.Tk):
 
         def worker():
             try:
-                # Evita di includere il tar se l'utente lo salva dentro la stessa cartella
                 save_abs = os.path.abspath(save_to)
                 base = os.path.basename(dest_dir.rstrip("\\/"))
 
                 with tarfile.open(save_abs, "w") as tar:
-                    # Aggiunge i file ricorsivamente preservando il nome root 'base'
                     for root, dirs, files in os.walk(dest_dir):
                         for name in files:
                             full = os.path.join(root, name)
                             if os.path.abspath(full) == save_abs:
-                                # skip il file .tar stesso
                                 continue
                             arcname = os.path.join(base, os.path.relpath(full, start=dest_dir)).replace("\\", "/")
                             self.log_line(f"Aggiungo: {arcname}")
                             tar.add(full, arcname=arcname, recursive=False)
-                        # aggiungi directory vuote (tar su Linux le vede)
                         for d in dirs:
                             dir_full = os.path.join(root, d)
                             rel_arc = os.path.join(base, os.path.relpath(dir_full, start=dest_dir)).replace("\\", "/")
@@ -666,23 +675,23 @@ class App(tk.Tk):
             except Exception:
                 messagebox.showerror("Errore", f"Impossibile aprire la cartella:\n{e}")
 
-    # ----- Settings: salva/leggi ultimo SAPCAR.exe -----
+    # ----- Settings: salva/leggi ultimo SAPCAR scelto -----
     def load_last_sapcar(self):
-        """Carica l'ultimo SAPCAR.exe usato da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
+        """Carica l'ultimo SAPCAR scelto da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
         try:
             with open(_settings_file(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             last = data.get("sapcar_path")
             if last and os.path.isfile(last):
                 self.sapcar_path.set(last)
-                self.log_line(f"(impostazioni) Caricato ultimo SAPCAR.exe: {last}")
+                self.log_line(f"(impostazioni) Caricato ultimo SAPCAR: {last}")
         except FileNotFoundError:
             pass
         except Exception as e:
             self.log_line(f"(impostazioni) Errore lettura impostazioni: {e}")
 
     def save_last_sapcar(self):
-        """Salva SOLO il percorso corrente di SAPCAR.exe nel file impostazioni."""
+        """Salva SOLO il percorso corrente di SAPCAR nel file impostazioni."""
         try:
             val = self.sapcar_path.get().strip('" ')
             data = {"sapcar_path": val} if val else {}
@@ -692,7 +701,7 @@ class App(tk.Tk):
             self.log_line(f"(impostazioni) Errore salvataggio impostazioni: {e}")
 
     def on_close(self):
-        """Salva l'ultimo SAPCAR.exe e chiude l'app."""
+        """Salva l'ultimo SAPCAR e chiude l'app."""
         try:
             self.save_last_sapcar()
         finally:
