@@ -8,9 +8,6 @@ Strumento Windows per:
 * estrarre con `./SAPCAR.exe --% -xvf <pkg> -R <dest>` (via PowerShell con gestione spazi/caratteri speciali)
 * **testare il kernel** con `disp+work -v` e mostrare solo le info principali
 * comprimere la cartella creata con i file scompattati in `.tar` (compatibile Linux/Unix)
-* **avviso automatico** quando esce una nuova versione su GitHub
-* **priorità automatica ai pacchetti `SAPEXE*`** (es. `SAPEXE_`, `SAPEXEDB_`) prima degli altri
-* **barra di avanzamento + ETA**, **apri cartella destinazione**, **esporta script PowerShell (.ps1)**
 
 ## Download
 
@@ -58,3 +55,4 @@ All’avvio il tool controlla se è disponibile una release più recente e mostr
 ## Licenza
 
 MIT
+
