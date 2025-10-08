@@ -40,8 +40,6 @@ Vai su **Releases** e scarica `sapcar_unpacker.exe`.
 
 All’avvio il tool controlla se è disponibile una release più recente e mostra un link alla pagina **Releases**.
 
-> L’avviso compare quando il **tag** della release è **maggiore** della versione dell’eseguibile; su repository privati l’avviso potrebbe non comparire.
-
 ## FAQ
 
 * Percorsi con spazi (OneDrive, “- Azienda”)? → Gestiti con short-path (8.3) e pass-through `--%`. Se persiste l’errore, prova con percorsi semplici (es. `C:\temp\sap\`).
@@ -55,4 +53,5 @@ All’avvio il tool controlla se è disponibile una release più recente e mostr
 ## Licenza
 
 MIT
+
 
