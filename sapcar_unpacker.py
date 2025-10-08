@@ -22,7 +22,6 @@ NOVITÀ:
 
 import os
 import sys
-import shutil
 import subprocess
 import threading
 import tarfile
@@ -31,189 +30,21 @@ from tkinter import filedialog, messagebox, scrolledtext
 import time
 from tkinter import ttk
 
-__version__ = "1.1.4"  # <--- aggiorna ad ogni release
-GITHUB_USER = "Pasqualeim"   # <-- metti il tuo username GitHub
-GITHUB_REPO = "sapcar-unpacker"          # <-- metti il nome del repo
-
 import json
-import webbrowser
-import urllib.request
-import urllib.error
 
-
-# ---------- Update checker (GitHub Releases) ----------
-def _parse_ver(v: str):
-    v = v.strip().lstrip("vV")
-    parts = []
-    for p in v.split("."):
-        try:
-            parts.append(int(p))
-        except ValueError:
-            break
-    return tuple(parts)
-
-def get_latest_release():
-    """Ottiene (tag, url) dalla Release più recente del repo GitHub."""
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
-    req = urllib.request.Request(url, headers={"User-Agent": f"{GITHUB_REPO}/{__version__}"})
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        data = json.loads(resp.read().decode("utf-8", "replace"))
-    tag = data.get("tag_name") or data.get("name") or ""
-    html_url = data.get("html_url") or f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases"
-    return tag, html_url
-
-def _notify_update(parent, latest_tag, rel_url):
-    if messagebox.askyesno(
-        "Aggiornamento disponibile",
-        f"È disponibile la versione {latest_tag} (tu hai {__version__}).\nAprire la pagina Releases su GitHub?"
-    ):
-        webbrowser.open(rel_url)
-
-def check_updates_async(parent):
-    def worker():
-        try:
-            latest_tag, rel_url = get_latest_release()
-            if latest_tag and _parse_ver(latest_tag) > _parse_ver(__version__):
-                parent.after(0, lambda: _notify_update(parent, latest_tag, rel_url))
-        except Exception:
-            pass
-    threading.Thread(target=worker, daemon=True).start()
-
-
-# ---------- Impostazioni: salva/leggi SOLO l'ultimo SAPCAR scelto ----------
-def _settings_file() -> str:
-    base = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SapcarUnpacker")
-    try:
-        os.makedirs(base, exist_ok=True)
-    except Exception:
-        pass
-    return os.path.join(base, "settings.json")
-
-
-# ---------- Utilità percorso / esecuzione ----------
-def to_short_path(path: str) -> str:
-    """Converte un percorso Windows in DOS 8.3 (short path). Se fallisce, restituisce l'originale."""
-    try:
-        import ctypes
-        _GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
-        _GetShortPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
-        buf_len = 4096
-        buf = ctypes.create_unicode_buffer(buf_len)
-        res = _GetShortPathNameW(path, buf, buf_len)
-        if res and buf.value:
-            return buf.value
-        return path
-    except Exception:
-        return path
-
-def get_powershell_exe() -> str:
-    """Trova PowerShell (Windows PowerShell o PowerShell 7)."""
-    for candidate in ("powershell", "powershell.exe", "pwsh", "pwsh.exe"):
-        path = shutil.which(candidate)
-        if path:
-            return path
-    return "powershell"
-
-def run_cmd(cwd, cmd, log_callback):
-    """Esegue un comando (lista argomenti) e streamma stdout/stderr nel log."""
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            shell=False,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        for line in proc.stdout:
-            log_callback(line.rstrip("\n"))
-        return proc.wait()
-    except FileNotFoundError as e:
-        log_callback(f"[ERRORE] File non trovato: {e}")
-        return 127
-    except Exception as e:
-        log_callback(f"[ERRORE] {e}")
-        return 1
-
-
-# ---------- Ricerca & filtro disp+work ----------
-def find_dispwork(base_dir: str):
-    """
-    Cerca disp+work/disp+work.exe ricorsivamente in base_dir.
-    Preferisce path che contengono 'ntamd64' o 'exe'.
-    """
-    base_dir = os.path.abspath(base_dir)
-    candidates = []
-
-    for root, dirs, files in os.walk(base_dir):
-        for name in files:
-            low = name.lower()
-            if low in ("disp+work", "disp+work.exe"):
-                full = os.path.join(root, name)
-                try:
-                    st = os.stat(full)
-                    mtime = st.st_mtime
-                except Exception:
-                    mtime = 0.0
-                prio = 0
-                lower_path = full.lower()
-                if "ntamd64" in lower_path:
-                    prio += 3
-                if f"{os.sep}exe{os.sep}" in lower_path or lower_path.endswith(f"{os.sep}exe") or f"{os.sep}uc{os.sep}" in lower_path:
-                    prio += 2
-                candidates.append((prio, mtime, -len(full), full))
-
-    if not candidates:
-        for cand in ("disp+work.exe", "disp+work"):
-            p = os.path.join(base_dir, cand)
-            if os.path.isfile(p):
-                return p
-        return None
-
-    candidates.sort(reverse=True)
-    return candidates[0][3]
-
-def extract_dispwork_main_section(lines):
-    """
-    Estrae solo la parte principale dell'output di 'disp+work -v':
-    - dalla riga "disp+work information" inclusa (compresi i separatori)
-    - fino alla riga prima di "disp+work patch information" (esclusa).
-    Se i marker non si trovano, restituisce l'output originale.
-    """
-    norm = [(i, (line or ""), (line or "").strip().lower()) for i, line in enumerate(lines)]
-    start_idx = None
-    end_idx = None
-
-    for i, raw, low in norm:
-        if low == "disp+work information":
-            start_idx = i
-            if i > 0 and set(norm[i - 1][1].strip()) <= set("-"):
-                start_idx = i - 1
-            break
-
-    if start_idx is None:
-        return lines
-
-    for i, raw, low in norm[start_idx + 1:]:
-        if low == "disp+work patch information":
-            end_idx = i
-            if i > 0 and set(norm[i - 1][1].strip()) <= set("-"):
-                end_idx = i - 1
-            break
-
-    if end_idx is None:
-        end_idx = len(lines)
-
-    return lines[start_idx:end_idx]
+from sapcar_unpacker_core import __version__
+from sapcar_unpacker_core.dispwork import extract_dispwork_main_section, find_dispwork
+from sapcar_unpacker_core.paths import to_short_path
+from sapcar_unpacker_core.powershell import get_powershell_exe, run_cmd
+from sapcar_unpacker_core.settings import settings_file
+from sapcar_unpacker_core.updates import check_updates_async
 
 
 # ---------- App GUI ----------
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("SAPCAR Unpacker")
+        self.title(f"SAPCAR Unpacker {__version__}")
         self.geometry("980x660")
         self.resizable(True, True)
 
@@ -679,7 +510,7 @@ class App(tk.Tk):
     def load_last_sapcar(self):
         """Carica l'ultimo SAPCAR scelto da %AppData%\\SapcarUnpacker\\settings.json (se esiste)."""
         try:
-            with open(_settings_file(), "r", encoding="utf-8") as f:
+            with open(settings_file(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             last = data.get("sapcar_path")
             if last and os.path.isfile(last):
@@ -695,7 +526,7 @@ class App(tk.Tk):
         try:
             val = self.sapcar_path.get().strip('" ')
             data = {"sapcar_path": val} if val else {}
-            with open(_settings_file(), "w", encoding="utf-8") as f:
+            with open(settings_file(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self.log_line(f"(impostazioni) Errore salvataggio impostazioni: {e}")
