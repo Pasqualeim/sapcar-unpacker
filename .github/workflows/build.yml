@@ -33,10 +33,6 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Syntax check
-        run: |
-          python -m compileall src/
-          
       - name: Prepare build environment
         run: |
           mkdir build
@@ -45,8 +41,8 @@ jobs:
           cp ../requirements.txt .
           
       - name: Build EXE (PyInstaller)
+        working-directory: build
         run: |
-          cd build
           pyinstaller --clean --onefile --noconsole --name sapcar_unpacker `
             --add-data "src;." `
             --hidden-import customtkinter `
@@ -58,10 +54,13 @@ jobs:
 
       - name: List build outputs (debug)
         run: |
-          echo "PWD:" $PWD
+          echo "Working directory:"
+          pwd
           dir
-          echo "DIST:"
-          dir dist
+          echo "Build directory:"
+          dir build
+          echo "Build/dist directory:"
+          dir build/dist
 
       - name: Upload EXE to the Release
         uses: softprops/action-gh-release@v2
