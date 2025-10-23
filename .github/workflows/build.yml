@@ -33,6 +33,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Syntax check
+        run: |
+          python -m compileall src/
+          
       - name: Prepare build environment
         run: |
           mkdir build
@@ -64,5 +68,5 @@ jobs:
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: |
-            dist/sapcar_unpacker.exe
+            build/dist/sapcar_unpacker.exe
           fail_on_unmatched_files: true
