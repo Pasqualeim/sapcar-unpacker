@@ -33,11 +33,66 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Syntax check
-        run: python -m py_compile src/main.py
+      - name: Create spec file
+        run: |
+          echo "# -*- mode: python -*-
+          block_cipher = None
+
+          a = Analysis(
+              ['src/main.py'],
+              pathex=['src'],
+              binaries=[],
+              datas=[('src', 'src')],
+              hiddenimports=['customtkinter', 'PIL', 'tkinter'],
+              hookspath=[],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=[],
+              win_no_prefer_redirects=False,
+              win_private_assemblies=False,
+              cipher=block_cipher,
+              noarchive=False,
+          )
+          
+          # Add customtkinter files
+          import os
+          import customtkinter
+          ctk_path = os.path.dirname(customtkinter.__file__)
+          a.datas += Tree(ctk_path, prefix='customtkinter', excludes=['*.py'])
+          
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+          
+          exe = EXE(
+              pyz,
+              a.scripts,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              [],
+              name='sapcar_unpacker',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              runtime_tmpdir=None,
+              console=False,
+              disable_windowed_traceback=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None,
+          )" > sapcar_unpacker.spec
 
       - name: Build EXE (PyInstaller)
-        run: pyinstaller --onefile --noconsole --name sapcar_unpacker --collect-data customtkinter src/main.py
+        run: |
+          pyinstaller --clean sapcar_unpacker.spec
+          
+      - name: Test EXE launch
+        run: |
+          cd dist
+          ./sapcar_unpacker.exe &
+          Start-Sleep -s 5
+          Get-Process sapcar_unpacker -ErrorAction SilentlyContinue | Stop-Process
 
       - name: List build outputs (debug)
         run: |
