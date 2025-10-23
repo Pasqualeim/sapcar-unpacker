@@ -33,6 +33,17 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Python compile check
+        run: |
+          # Verifica che il file esista
+          if (Test-Path src/main.py) {
+            echo "Compiling src/main.py..."
+            python -m py_compile src/main.py
+          } else {
+            echo "Error: src/main.py not found"
+            exit 1
+          }
+
       - name: Prepare build environment
         run: |
           mkdir build

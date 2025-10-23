@@ -1,0 +1,25 @@
+# File Python compilati
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build e distribuzione
+build/
+dist/
+*.spec
+
+# Vecchio file
+sapcar_unpacker.py
+
+# Ambiente virtuale
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+
+# File di sistema
+.DS_Store
+Thumbs.db
