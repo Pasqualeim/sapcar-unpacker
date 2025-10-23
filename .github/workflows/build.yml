@@ -27,14 +27,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Syntax check
-        run: python -m py_compile sapcar_unpacker.py
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
 
-      - name: Install PyInstaller
-        run: pip install --upgrade pip && pip install pyinstaller
+      - name: Syntax check
+        run: python -m py_compile src/main.py
 
       - name: Build EXE (PyInstaller)
-        run: pyinstaller --onefile --noconsole --name sapcar_unpacker sapcar_unpacker.py
+        run: pyinstaller --onefile --noconsole --name sapcar_unpacker --collect-data customtkinter src/main.py
 
       - name: List build outputs (debug)
         run: |
