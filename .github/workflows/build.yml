@@ -17,10 +17,13 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout at tag
+      - name: Checkout repository (force main branch)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          # Use the main branch so the workflow always runs with the latest files
+          # in `main` instead of the tree present in the release tag. This avoids
+          # old releases referencing removed files like `sapcar_unpacker.py`.
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
