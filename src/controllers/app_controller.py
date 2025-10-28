@@ -3,7 +3,7 @@ import threading
 import time
 from tkinter import messagebox, filedialog
 from models.sapcar_model import SapcarModel
-from utils.file_utils import to_short_path, get_powershell_exe, find_dispwork
+from utils.file_utils import to_short_path, find_dispwork
 from utils.subprocess_utils import run_cmd
 from utils.settings_manager import SettingsManager
 import tarfile
@@ -159,7 +159,7 @@ class AppController:
     def _execute_extraction(self, sapcar_dir, sapcar_name, sar_files):
         """Esegue l'estrazione effettiva dei file"""
         dest_dir = os.path.normpath(self.view.dest_dir.get().strip('" '))
-        ps_exe = get_powershell_exe()
+        
         
         overall_rc = 0
         self._init_progress(len(sar_files))
@@ -177,23 +177,27 @@ class AppController:
                 sar_arg = sar_short
                 sar_used = "short"
             else:
-                sar_arg = f'"{sar_norm}"'
+                # con subprocess (shell=False) non servono virgolette
+                sar_arg = sar_norm
                 sar_used = "quoted"
 
             if dest_short and os.path.exists(dest_short) and " " not in dest_short:
                 dest_arg = dest_short
                 dest_used = "short"
             else:
-                dest_arg = f'"{dest_dir}"'
+                # con subprocess (shell=False) non servono virgolette
+                dest_arg = dest_dir
                 dest_used = "quoted"
 
             self._log(f"(info) sar arg: {sar_arg} ({sar_used}), dest arg: {dest_arg} ({dest_used})")
 
             # PowerShell: --% passa i parametri così com'è
-            ps_cmd = f'& ./"{sapcar_name}" --% -xvf {sar_arg} -R {dest_arg}'
-            cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
+            sapcar_exe = os.path.join(sapcar_dir, sapcar_name)
+            cmd = [sapcar_exe, "-xvf", sar_arg, "-R", dest_arg]
 
-            self._log(f"Comando: {ps_cmd}")
+            # Log leggibile del comando
+            pretty = " ".join([f'"{a}"' if (" " in a or "\t" in a) else a for a in cmd])
+            self._log(f"Comando: {pretty}")
             
             t0 = time.time()
             rc = run_cmd(sapcar_dir, cmd, self._log)
@@ -391,7 +395,7 @@ class AppController:
 
         disp_dir = os.path.dirname(disp)
         disp_name = os.path.basename(disp)
-        ps_exe = get_powershell_exe()
+        
 
         self._log(f"\n== Test kernel: eseguo {disp} -v ==")
 
@@ -403,9 +407,10 @@ class AppController:
 
             rc = None
             for flag in ("-v", "-V"):
-                ps_cmd = f'& ./"{disp_name}" {flag}'
-                cmd = [ps_exe, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
-                self._log(f"Comando PowerShell: {ps_cmd} (cwd={disp_dir})")
+                exe = os.path.join(disp_dir, disp_name)
+                cmd = [exe, flag]
+                pretty = " ".join([f'"{a}"' if (" " in a or "\t" in a) else a for a in cmd])
+                self._log(f"Comando: {pretty} (cwd={disp_dir})")
                 rc = run_cmd(disp_dir, cmd, collect_only)
                 if rc == 0:
                     break
